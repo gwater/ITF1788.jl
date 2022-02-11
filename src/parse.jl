@@ -1,11 +1,12 @@
 const indent = "    "
 
 extract_name(line) = split(line) |> parts -> join(parts[2:end-1], " ")
+strip_testcase(line) = rstrip(strip(line), ';')
 
 # ideally this should be rewritten to output to an IO buffer
 function parse_block(lines; test_warn=true)
     testset_name = extract_name(first(lines))
-    tests = filter(strip.(lines[2:end - 1])) do line
+    tests = filter(strip_testcase.(lines[2:end - 1])) do line
         return (
             isempty(line),
             startswith(line, "//"), # comments
@@ -123,6 +124,9 @@ end
 function build_expression(lhs, rhs::AbstractString)
     rhs == "nai()" && return "isnai($lhs)"
     rhs == "NaN" && return "isnan($lhs)"
+    rhs == "true" && return lhs
+    rhs == "false" && return lhs[end] == ')' ? "!" * lhs : "!($lhs)"
+    #rhs == "emptyinterval()" && return "isempty($lhs)"
     return "$lhs == $rhs"
 end
 
