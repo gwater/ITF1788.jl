@@ -4,7 +4,7 @@ extract_name(line) = join(split(line)[2:end-1], " ")
 
 start_testset!(dest, line) =
     println(dest, "@testset \"", extract_name(line), "\" begin")
-finish_testset!(dest) = println(dest, "end")
+finish_testset!(dest) = println(dest, "end\n")
 
 begins_testset(line) = startswith(line, "testcase")
 finishes_testset(line) = line == "}"
