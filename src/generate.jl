@@ -68,7 +68,8 @@ function generate(; test_warn=true, output="test_ITF1788")
 
     f = open(joinpath(output, "run_ITF1788.jl"); write=true)
     for file in files
-        write(f, """include("$(file[1:end-4]).jl")\n""")
+        basename = file[1:end-4]
+        write(f, """@testset "$basename" begin include("$basename.jl") end\n""")
     end
     close(f)
 end
