@@ -1,4 +1,3 @@
-const indent = "    "
 
 extract_name(line) = join(split(line)[2:end-1], " ")
 
@@ -13,6 +12,8 @@ is_comment(line) = startswith(line, "//")
 begins_multiline_comment(line) = startswith(line, "/*")
 
 skip_block(src, stopline) = readuntil(src, "\n" * stopline * "\n")
+skip_multiline_comment(src) = skip_block(src, "*/")
+skip_testset(src) = skip_block(src, "}")
 
 function translate!(dest::IO, src::IO)
     while !eof(src)
@@ -20,10 +21,10 @@ function translate!(dest::IO, src::IO)
         if isempty(line) || is_comment(line)
             nothing
         elseif begins_multiline_comment(line)
-            skip_block(src, "*/")
+            skip_multiline_comment(src)
         elseif begins_testset(line)
             if begins_decoration_testset(line)
-                skip_block(src, "}")
+                skip_testset(src)
             else
                 start_testset!(dest, line)
             end
@@ -36,17 +37,22 @@ function translate!(dest::IO, src::IO)
     end
 end
 
-skip_testcase(case) = any((
-        occursin("]_", case), # decorated intervals
-        occursin("d-numsToInterval", case), # decorated intervals
-        occursin("textToInterval", case), # string input
-        occursin("signal", case), # log tests
-    ))
+tests_decorated_intervals(case) =
+    occursin("]_", case) || occursin("d-numsToInterval", case)
+tests_string_input(case) = occursin("textToInterval", case)
+tests_logging(case) = occursin("signal", case)
+
+skip_testcase(case) =
+    tests_decorated_intervals(case) ||
+    tests_string_input(case) ||
+    tests_logging(case)
+
+indent(io) = print(io, repeat(' ', 4))
 
 function translate!(dest::IO, itl_test::AbstractString)
     skip_testcase(itl_test) && return
     jl_test = translate(itl_test)
-    print(dest, join(repeat(' ', 4))) # indentation
+    indent(dest)
     println(dest, jl_test)
 end
 
@@ -72,7 +78,7 @@ function translate(itl_test)
         return ifelse(isbroken(jl_test), "@test_broken ", "@test ") * jl_test
     catch
         @warn "caused exception: " * jl_test
-        return "#@test_broken " * jl_test
+        return "# " * itl_test
     end
 end
 
@@ -86,7 +92,7 @@ function rebuild_lhs(lhs)
     args = replace(args, "infinity" => "Inf")
     args = replace(args, "X" => "x")
     if fname == "b-numsToInterval"
-        args = join(split(args), ',')
+        args = replace(args, ' ' => ',')
         return "interval($args)"
     end
 
