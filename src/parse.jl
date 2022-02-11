@@ -1,23 +1,26 @@
-function parse_block(block; failure=true, test_warn=true)
+const indent = "    "
 
-    bname = match(r"^\s*testcase\s+(\S+)\s+\{\s*$", block[1])[1]
+extract_name(line) = split(line) |> parts -> join(parts[2:end-1], " ")
 
-    testset = """@testset "$bname" begin
-            """
-    ind = "    "
-    for i in 2:length(block)-1
-        line = strip(block[i])
-        (isempty(line) || startswith(line, "//")) && continue
-        command = parse_command(line; failure=failure, test_warn=test_warn)
-        testset = """$testset
-        $ind$command
-        """
+# ideally this should be rewritten to output to an IO buffer
+function parse_block(lines; test_warn=true)
+    testset_name = extract_name(first(lines))
+    tests = filter(strip.(lines[2:end - 1])) do line
+        return !(
+            isempty(line) ||
+            startswith(line, "//") || # comments
+            occursin("]_", line) # decorated intervals
+        )
     end
-    testset = """$testset
-            end
-
-            """
+    return mapfoldl(
+        test -> parse_command(test; test_warn=test_warn),
+        (testset, command) -> string(testset, indent, command, "\n"),
+        tests,
+        init = """@testset "$testset_name" begin\n"""
+    ) * "end\n\n"
 end
+
+isbroken(expr) = !eval(Meta.parse(expr))
 
 """
 
@@ -32,11 +35,9 @@ is parsed into
 @test +(Interval(1, 2), Interval(1, 2)) === Interval(2, 4)
 ```
 """
-function parse_command(line; failure=true, test_warn=true)
+function parse_command(line; test_warn=true)
     # extract parts in line
-    m = match(r"^(.+)=(.+);$", line)
-    lhs = m[1]
-    rhs = m[2]
+    lhs, rhs = split(line, "=")
     rhs = split(rhs, "signal")
     warn = length(rhs) > 1 ? rhs[2] : ""
     rhs = rhs[1]
@@ -45,17 +46,14 @@ function parse_command(line; failure=true, test_warn=true)
     rhs = parse_rhs(rhs)
 
     expr = build_expression(lhs, rhs)
-    if failure
-        try
-            res = eval(Meta.parse(expr))
-            command = res ? "@test $expr" : "@test_broken $expr"
-        catch
-            command = "@test_broken $expr"
-        end
-    else
-        command = "@test $expr"
+    try
+        command = ifelse(isbroken(expr), "@test_broken ", "@test ") * expr
+    catch
+        @warn "caused exception: " * expr
+        command = "#@test_broken " * expr
     end
     if test_warn
+        # change this to @test_throws?
         command = isempty(warn) ? command : "@test_logs (:warn, ) $command"
     end
     return command
@@ -63,13 +61,17 @@ end
 
 function parse_lhs(lhs)
     lhs = strip(lhs)
-    m =  match(r"^(\S+) (.+)$", lhs)
-    fname = m[1]
-    args = m[2]
+    fname, args = split(lhs, limit = 2)
 
-    #special case, input text
-    fname == "b-textToInterval" && return "@interval($args)"
-    fname == "d-textToInterval" && return "@decorated($args)"
+    # input text or decorated, ignore
+    fname == "b-textToInterval" && return "true" #"@interval($args)"
+    fname == "d-textToInterval" && return "true" #"@decorated($args)"
+    fname == "d-numsToInterval" && return "true"
+#     if fname == "d-numsToInterval"
+#         args = join(split(args), ',')
+#         return "DecoratedInterval($args)"
+#     end
+    # filter our decorated intervals
 
     # input numbers
     args = replace(args, "infinity" => "Inf")
@@ -79,13 +81,8 @@ function parse_lhs(lhs)
         return "interval($args)"
     end
 
-    if fname == "d-numsToInterval"
-        args = join(split(args), ',')
-        return "DecoratedInterval($args)"
-    end
-
     # input intervals
-    rx = r"\[([^\]]+)\](?:_(\w+))?"
+    rx = r"\[([^\]]+)\](?:_(\w+))?" # this is incomprehensible
     for m in eachmatch(rx, args)
         args = replace(args, m.match => parse_interval(m[1], m[2]))
     end
@@ -118,7 +115,6 @@ function parse_rhs(rhs)
 end
 
 function parse_interval(ival, dec; check=true)
-
     ival == "nai" && return "nai()"
     if ival == "entire"
         ival =  "entireinterval()"
@@ -134,7 +130,7 @@ end
 function build_expression(lhs, rhs::AbstractString)
     rhs == "nai()" && return "isnai($lhs)"
     rhs == "NaN" && return "isnan($lhs)"
-    return "$lhs === $rhs"
+    return "$lhs == $rhs"
 end
 
 function build_expression(lhs, rhs::Vector)

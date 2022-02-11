@@ -1,6 +1,6 @@
 module ITF1788
 
-using IntervalArithmetic, IntervalContractors, LinearAlgebra
+using IntervalArithmetic, LinearAlgebra
 
 export parse_block, parse_command, generate
 
