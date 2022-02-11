@@ -60,19 +60,16 @@ is parsed into
 """
 function translate(itl_test)
     lhs, rhs = split(itl_test, "=")
-    lhs = parse_lhs(lhs)
-    rhs = parse_rhs(rhs)
-
-    expr = build_expression(lhs, rhs)
+    jl_test = rebuild(rebuild_lhs(lhs), rebuild_rhs(rhs))
     try
-        return ifelse(isbroken(expr), "@test_broken ", "@test ") * expr
+        return ifelse(isbroken(jl_test), "@test_broken ", "@test ") * jl_test
     catch
-        @warn "caused exception: " * expr
-        return "#@test_broken " * expr
+        @warn "caused exception: " * jl_test
+        return "#@test_broken " * jl_test
     end
 end
 
-function parse_lhs(lhs)
+function rebuild_lhs(lhs)
     lhs = strip(lhs)
     fname, args = split(lhs, limit = 2)
 
@@ -87,7 +84,7 @@ function parse_lhs(lhs)
     # input intervals
     rx = r"\[([^\]]+)\](?:_(\w+))?" # this is incomprehensible
     for m in eachmatch(rx, args)
-        args = replace(args, m.match => parse_interval(m[1], m[2]))
+        args = replace(args, m.match => translate_interval(m[1], m[2]))
     end
     args = replace(args, " " => ", ")
     args = replace(args, ",," => ",")
@@ -104,7 +101,7 @@ function int_to_float(x)
         return x*".0"
     end
 end
-function parse_rhs(rhs)
+function rebuild_rhs(rhs)
     rhs = strip(rhs)
     rhs = replace(rhs, "infinity" => "Inf")
     rhs = replace(rhs, "X" => "x")
@@ -112,25 +109,23 @@ function parse_rhs(rhs)
         return map(int_to_float, split(rhs))
     else # one or more intervals
         rx = r"\[([^\]]+)\](?:_(\w+))?"
-        ivals = [parse_interval(m[1], m[2]; check=false) for m in eachmatch(rx, rhs)]
+        ivals = [translate_interval(m[1], m[2]) for m in eachmatch(rx, rhs)]
         return ivals
     end
 end
 
-function parse_interval(ival, dec; check=true)
-    ival == "nai" && return "nai()"
-    if ival == "entire"
-        ival =  "entireinterval()"
-    elseif ival == "empty"
-        ival = "emptyinterval()"
-    else
-        ival = check ? "interval($ival)" : "Interval($ival)"
-    end
-    isnothing(dec) || (ival = "DecoratedInterval($ival, $dec)")
-    return ival
-end
+const special_intervals = Dict(
+    "nai" => "nai()",
+    "entire" => "entireinterval()",
+    "empty" => "emptyinterval()"
+)
 
-function build_expression(lhs, rhs::AbstractString)
+translate_interval(ival, dec) =
+    haskey(special_intervals, ival) ?
+    special_intervals[ival] :
+    "interval($ival)"
+
+function rebuild(lhs, rhs::AbstractString)
     rhs == "nai()" && return "isnai($lhs)"
     rhs == "NaN" && return "isnan($lhs)"
     rhs == "true" && return lhs
@@ -139,8 +134,8 @@ function build_expression(lhs, rhs::AbstractString)
     return "$lhs == $rhs"
 end
 
-function build_expression(lhs, rhs::Vector)
-    length(rhs) == 1 && return build_expression(lhs, rhs[1])
-    expr = [build_expression(lhs*"[$i]", r) for (i, r) in enumerate(rhs)]
+function rebuild(lhs, rhs::Vector)
+    length(rhs) == 1 && return rebuild(lhs, rhs[1])
+    expr = [rebuild(lhs*"[$i]", r) for (i, r) in enumerate(rhs)]
     return join(expr, " && ")
 end
