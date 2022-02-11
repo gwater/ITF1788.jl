@@ -1,27 +1,46 @@
 const indent = "    "
 
-extract_name(line) = split(line) |> parts -> join(parts[2:end-1], " ")
-strip_testcase(line) = rstrip(strip(line), ';')
+extract_name(line) = join(split(line)[2:end-1], " ")
 
-# ideally this should be rewritten to output to an IO buffer
-function parse_block(lines; test_warn=true)
-    testset_name = extract_name(first(lines))
-    tests = filter(strip_testcase.(lines[2:end - 1])) do line
-        return (
-            isempty(line),
-            startswith(line, "//"), # comments
-            occursin("]_", line), # decorated intervals
-            occursin("d-numsToInterval", line), # decorated intervals
-            occursin("textToInterval", line), # string input
-            occursin("signal", line), # log tests
-        ) |> !any
+start_block(dest, line) =
+    println(dest, "@testset \"", extract_name(line), "\" begin")
+finish_block(dest) = println(dest, "end")
+
+skip_block(line) = occursin("dec", extract_name(line))
+
+function translate!(dest::IO, src::IO)
+    while !eof(src)
+        line = rstrip(strip(readline(src)), ';')
+        if isempty(line) || startswith(line, "//")
+            nothing
+        elseif startswith(line, "/*")
+            readuntil(src, "\n*/\n")
+        elseif startswith(line, "testcase")
+            if skip_block(line)
+                readuntil(src, "\n}\n")
+            else
+                start_block(dest, line)
+            end
+        elseif line == "}"
+            finish_block(dest)
+        else
+            translate!(dest, line)
+        end
     end
-    return mapfoldl(
-        test -> parse_command(test; test_warn=test_warn),
-        (testset, command) -> string(testset, indent, command, "\n"),
-        tests,
-        init = """@testset "$testset_name" begin\n"""
-    ) * "end\n\n"
+end
+
+skip_testcase(line) = any((
+        occursin("]_", line), # decorated intervals
+        occursin("d-numsToInterval", line), # decorated intervals
+        occursin("textToInterval", line), # string input
+        occursin("signal", line), # log tests
+    ))
+
+function translate!(dest::IO, itl_test::AbstractString)
+    skip_testcase(itl_test) && return
+    jl_test = translate(itl_test)
+    print(dest, join(repeat(' ', 4))) # indentation
+    println(dest, jl_test)
 end
 
 isbroken(expr) = !eval(Meta.parse(expr))
@@ -39,28 +58,18 @@ is parsed into
 @test +(Interval(1, 2), Interval(1, 2)) === Interval(2, 4)
 ```
 """
-function parse_command(line; test_warn=true)
-    # extract parts in line
-    lhs, rhs = split(line, "=")
-    rhs = split(rhs, "signal")
-    warn = length(rhs) > 1 ? rhs[2] : ""
-    rhs = rhs[1]
-
+function translate(itl_test)
+    lhs, rhs = split(itl_test, "=")
     lhs = parse_lhs(lhs)
     rhs = parse_rhs(rhs)
 
     expr = build_expression(lhs, rhs)
     try
-        command = ifelse(isbroken(expr), "@test_broken ", "@test ") * expr
+        return ifelse(isbroken(expr), "@test_broken ", "@test ") * expr
     catch
         @warn "caused exception: " * expr
-        command = "#@test_broken " * expr
+        return "#@test_broken " * expr
     end
-    if test_warn
-        # change this to @test_throws?
-        command = isempty(warn) ? command : "@test_logs (:warn, ) $command"
-    end
-    return command
 end
 
 function parse_lhs(lhs)
