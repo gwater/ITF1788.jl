@@ -2,38 +2,45 @@ const indent = "    "
 
 extract_name(line) = join(split(line)[2:end-1], " ")
 
-start_block(dest, line) =
+start_testset!(dest, line) =
     println(dest, "@testset \"", extract_name(line), "\" begin")
-finish_block(dest) = println(dest, "end")
+finish_testset!(dest) = println(dest, "end")
 
-skip_block(line) = occursin("dec", extract_name(line))
+begins_testset(line) = startswith(line, "testcase")
+finishes_testset(line) = line == "}"
+begins_decoration_testset(line) = occursin("dec", extract_name(line))
+is_comment(line) = startswith(line, "//")
+begins_multiline_comment(line) = startswith(line, "/*")
+
+skip_block(src, stopline) = readuntil(src, "\n" * stopline * "\n")
 
 function translate!(dest::IO, src::IO)
     while !eof(src)
         line = rstrip(strip(readline(src)), ';')
-        if isempty(line) || startswith(line, "//")
+        if isempty(line) || is_comment(line)
             nothing
-        elseif startswith(line, "/*")
-            readuntil(src, "\n*/\n")
-        elseif startswith(line, "testcase")
-            if skip_block(line)
-                readuntil(src, "\n}\n")
+        elseif begins_multiline_comment(line)
+            skip_block(src, "*/")
+        elseif begins_testset(line)
+            if begins_decoration_testset(line)
+                skip_block(src, "}")
             else
-                start_block(dest, line)
+                start_testset!(dest, line)
             end
-        elseif line == "}"
-            finish_block(dest)
+        elseif finishes_testset(line)
+            finish_testset!(dest)
         else
-            translate!(dest, line)
+            itl_test = line
+            translate!(dest, itl_test)
         end
     end
 end
 
-skip_testcase(line) = any((
-        occursin("]_", line), # decorated intervals
-        occursin("d-numsToInterval", line), # decorated intervals
-        occursin("textToInterval", line), # string input
-        occursin("signal", line), # log tests
+skip_testcase(case) = any((
+        occursin("]_", case), # decorated intervals
+        occursin("d-numsToInterval", case), # decorated intervals
+        occursin("textToInterval", case), # string input
+        occursin("signal", case), # log tests
     ))
 
 function translate!(dest::IO, itl_test::AbstractString)
@@ -69,6 +76,8 @@ function translate(itl_test)
     end
 end
 
+const interval_pattern = r"\[([^\]]+)\]"
+
 function rebuild_lhs(lhs)
     lhs = strip(lhs)
     fname, args = split(lhs, limit = 2)
@@ -82,35 +91,31 @@ function rebuild_lhs(lhs)
     end
 
     # input intervals
-    rx = r"\[([^\]]+)\](?:_(\w+))?" # this is incomprehensible
-    for m in eachmatch(rx, args)
-        args = replace(args, m.match => translate_interval(m[1], m[2]))
+    for m in eachmatch(interval_pattern, args)
+        args = replace(args, m.match => translate_interval(m[1]))
     end
     args = replace(args, " " => ", ")
     args = replace(args, ",," => ",")
     args = replace(args, "{" => "[")
     args = replace(args, "}" => "]")
     return functions[fname](args)
-
 end
 
-function int_to_float(x)
-    if isnothing(tryparse(Int, x))
-        return x
-    else
-        return x*".0"
-    end
-end
+isintstring(x) = !isnothing(tryparse(Int, x))
+floatstring(x) = x * ifelse(isintstring(x), ".0", "")
+
 function rebuild_rhs(rhs)
     rhs = strip(rhs)
     rhs = replace(rhs, "infinity" => "Inf")
     rhs = replace(rhs, "X" => "x")
-    if '[' ∉ rhs # one or more scalar/bolean values separated by space
-        return map(int_to_float, split(rhs))
+    if '[' ∉ rhs # one or more scalar/boolean values separated by space
+        return map(floatstring, split(rhs))
     else # one or more intervals
-        rx = r"\[([^\]]+)\](?:_(\w+))?"
-        ivals = [translate_interval(m[1], m[2]) for m in eachmatch(rx, rhs)]
-        return ivals
+        intervals = map(
+            m -> translate_interval(m[1]),
+            eachmatch(interval_pattern, rhs)
+        )
+        return intervals
     end
 end
 
@@ -120,7 +125,7 @@ const special_intervals = Dict(
     "empty" => "emptyinterval()"
 )
 
-translate_interval(ival, dec) =
+translate_interval(ival) =
     haskey(special_intervals, ival) ?
     special_intervals[ival] :
     "interval($ival)"
@@ -130,7 +135,6 @@ function rebuild(lhs, rhs::AbstractString)
     rhs == "NaN" && return "isnan($lhs)"
     rhs == "true" && return lhs
     rhs == "false" && return lhs[end] == ')' ? "!" * lhs : "!($lhs)"
-    #rhs == "emptyinterval()" && return "isempty($lhs)"
     return "$lhs == $rhs"
 end
 
