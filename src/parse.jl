@@ -6,11 +6,14 @@ extract_name(line) = split(line) |> parts -> join(parts[2:end-1], " ")
 function parse_block(lines; test_warn=true)
     testset_name = extract_name(first(lines))
     tests = filter(strip.(lines[2:end - 1])) do line
-        return !(
-            isempty(line) ||
-            startswith(line, "//") || # comments
-            occursin("]_", line) # decorated intervals
-        )
+        return (
+            isempty(line),
+            startswith(line, "//"), # comments
+            occursin("]_", line), # decorated intervals
+            occursin("d-numsToInterval", line), # decorated intervals
+            occursin("textToInterval", line), # string input
+            occursin("signal", line), # log tests
+        ) |> !any
     end
     return mapfoldl(
         test -> parse_command(test; test_warn=test_warn),
@@ -62,16 +65,6 @@ end
 function parse_lhs(lhs)
     lhs = strip(lhs)
     fname, args = split(lhs, limit = 2)
-
-    # input text or decorated, ignore
-    fname == "b-textToInterval" && return "true" #"@interval($args)"
-    fname == "d-textToInterval" && return "true" #"@decorated($args)"
-    fname == "d-numsToInterval" && return "true"
-#     if fname == "d-numsToInterval"
-#         args = join(split(args), ',')
-#         return "DecoratedInterval($args)"
-#     end
-    # filter our decorated intervals
 
     # input numbers
     args = replace(args, "infinity" => "Inf")
