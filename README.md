@@ -45,10 +45,15 @@ this will become
 
 if the test is successful and
 ```julia
-# add [1.0, 2.0] [1.0, 2.0] = [2.0, 4.0]
+@test_broken +(interval(1.0, 2.0), interval(1.0, 2.0)) == interval(2.0, 4.0)
 ```
 
 if the test is unsuccessful.
+
+If the test causes an exception, the translation is probably invalid and we return the original test case as a comment:
+```julia
+# add [1.0, 2.0] [1.0, 2.0] = [2.0, 4.0]
+```
 
 If you do not want to actually run the test and mark the broken tests, you can run
 `generate(; failure=false)`. This will use the macro `@test` for all tests regardless of whether they succeed or not.
