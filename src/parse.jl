@@ -38,22 +38,33 @@ function translate!(dest::IO, src::IO)
 end
 
 tests_decorated_intervals(case) =
-    occursin("]_", case) || occursin("d-numsToInterval", case)
+    occursin("]_", case) ||
+    occursin("d-numsToInterval", case) ||
+    occursin("setDec", case) ||
+    occursin("intervalPart", case)
 tests_string_input(case) = occursin("textToInterval", case)
 tests_logging(case) = occursin("signal", case)
 
 skip_testcase(case) =
     tests_decorated_intervals(case) ||
-    tests_string_input(case) ||
-    tests_logging(case)
+    tests_string_input(case)
 
 indent(io) = print(io, repeat(' ', 4))
 
 function translate!(dest::IO, itl_test::AbstractString)
     skip_testcase(itl_test) && return
-    jl_test = translate(itl_test)
+    jl_test = tests_logging(itl_test) ?
+        translate_logtest(itl_test) : translate(itl_test)
     indent(dest)
     println(dest, jl_test)
+end
+
+function translate_logtest(itl_test)
+    itl_test, exc = split(itl_test, " signal ")
+    exc != "UndefinedOperation" && return "# " * itl_test
+    lhs, rhs = split(itl_test, "=")
+    jl_test = rebuild(rebuild_lhs(lhs), rebuild_rhs(rhs))
+    return "@test_throws AssertionError " * jl_test
 end
 
 isbroken(expr) = !eval(Meta.parse(expr))
