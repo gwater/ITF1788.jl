@@ -93,7 +93,7 @@ function rebuild_lhs(lhs)
     args = replace(args, "X" => "x")
     if fname == "b-numsToInterval"
         args = replace(args, ' ' => ',')
-        return "interval($args)"
+        return "Interval($args)"
     end
 
     # input intervals
