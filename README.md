@@ -55,9 +55,6 @@ If the test causes an exception, the translation is probably invalid and we retu
 # add [1.0, 2.0] [1.0, 2.0] = [2.0, 4.0]
 ```
 
-If you do not want to actually run the test and mark the broken tests, you can run
-`generate(; failure=false)`. This will use the macro `@test` for all tests regardless of whether they succeed or not.
-
 By default, all test files are created into a folder `test_ITF1788` in your current directory. You can change the output directory with the
 keyword `output`, e.g. `generate(; output="mydirectory")`.
 
