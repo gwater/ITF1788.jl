@@ -147,11 +147,37 @@ translate_interval(ival) =
     special_intervals[ival] :
     "interval($ival)"
 
+const relaxed_functions = [
+        "sinh",
+        "cosh",
+        "tanh",
+        "coth",
+        "sech",
+        "csch",
+        "asinh",
+        "acosh",
+        "atanh",
+        "acoth",
+        "atan",
+        "cot",
+        "acot",
+        "sec",
+        "csc",
+        "exp2",
+        "exp10",
+        "^",
+        "cbrt"
+    ]
+
+only_requires_validity(lhs) =
+    any(startswith(lhs, f * "(") for f in relaxed_functions)
+
 function rebuild(lhs, rhs::AbstractString)
     rhs == "nai()" && return "isnai($lhs)"
     rhs == "NaN" && return "isnan($lhs)"
     rhs == "true" && return lhs
     rhs == "false" && return lhs[end] == ')' ? "!" * lhs : "!($lhs)"
+    only_requires_validity(lhs) && return "$lhs ⊇ $rhs"
     return "$lhs == $rhs"
 end
 
